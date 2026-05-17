@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D Sports Car Racer</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap');
+
+        * {
+            margin: 0; padding: 0; box-sizing: border-box; font-family: 'Poppins', sans-serif; touch-action: none;
+        }
+
+        body { height: 100vh; background: #87CEEB; overflow: hidden; color: #fff; }
+
+        #gameCanvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+
+        .ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10;
+            display: flex; flex-direction: column; align-items: center; pointer-events: none;
+        }
+
+        .interactive { pointer-events: auto; }
+
+        #splash-screen {
+            background: #111; width: 100%; height: 100%; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; transition: opacity 1s ease; z-index: 100;
+        }
+
+        .splash-logo { font-size: 80px; animation: pulse 1s infinite alternate; }
+        @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.1); } }
+        
+        .splash-text { font-size: 20px; color: #00ff88; font-weight: bold; text-transform: uppercase; margin-top: 15px; }
+
+        .menu-container {
+            background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(10px); padding: 30px;
+            border-radius: 15px; border: 2px solid #00c6ff; text-align: center; width: 90%;
+            max-width: 350px; margin-top: 20vh; box-shadow: 0 0 20px rgba(0, 198, 255, 0.5);
+        }
+
+        input { width: 100%; padding: 12px; margin: 10px 0; border-radius: 5px; border: none; text-align: center; font-weight: bold; }
+        button {
+            width: 100%; padding: 12px; border: none; border-radius: 5px;
+            background: linear-gradient(45deg, #00c6ff, #0072ff); color: white;
+            font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 10px; transition: 0.2s;
+        }
+        button:hover { transform: scale(1.05); }
+
+        #hud {
+            display: none; width: 100%; padding: 15px 20px; justify-content: space-between;
+            align-items: flex-start; background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+        }
+
+        .stats { font-size: 20px; font-weight: bold; color: #ffcc00; text-shadow: 2px 2px 0 #000; }
+        .logout-btn { width: auto; padding: 5px 15px; background: transparent; border: 2px solid #ff416c; font-size: 14px; }
+
+        #game-over-screen { display: none; margin-top: 30vh; border-color: #ff416c; box-shadow: 0 0 20px rgba(255, 65, 108, 0.5); }
+    </style>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <audio id="engine-sound" loop>
+        <source src="engine.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="coin-sound">
+        <source src="coin.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="crash-sound">
+        <source src="crash.mp3" type="audio/mpeg">
+    </audio>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div class="ui-layer">
+        <div id="splash-screen" class="interactive">
+            <div class="splash-logo">🏎️</div>
+            <div class="splash-text">Created by Rajdeep Paul</div>
+        </div>
+
+        <div id="login-section" class="menu-container interactive" style="display: none;">
+            <h2 style="margin-bottom: 15px; color: #00c6ff;">3D Sports Car Racer</h2>
+            <input type="email" id="email" placeholder="Enter valid Email">
+            <input type="password" id="password" placeholder="Enter Password">
+            <button onclick="authenticateUser()">Start Engine</button>
+        </div>
+
+        <div id="hud" class="interactive">
+            <div class="stats">
+                Score: <span id="score">0</span> <br>
+                <span style="font-size: 14px; color:#ddd;">High Score: <span id="high-score">0</span></span>
+            </div>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+
+        <div id="game-over-screen" class="menu-container interactive">
+            <h2 style="color: #ff416c;">CAR CRASHED!</h2>
+            <p>Your Score: <span id="final-score" style="color:#00ff88; font-size:24px;">0</span></p>
+            <button style="background: linear-gradient(45deg, #ff416c, #ff4b2b);" onclick="restartGame()">Race Again</button>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. UI & Authentication ---
+        let currentUserEmail = "";
+        let highScore = 0;
+
+        const engineSound = document.getElementById("engine-sound");
+        const coinSound = document.getElementById("coin-sound");
+        const crashSound = document.getElementById("crash-sound");
+
+        window.onload = function() {
+            setTimeout(() => {
+                document.getElementById("splash-screen").style.opacity = "0";
+                setTimeout(() => {
+                    document.getElementById("splash-screen").style.display = "none";
+                    let activeSession = localStorage.getItem("racerSession");
+                    if (activeSession) {
+                        currentUserEmail = activeSession;
+                        showGameHUD();
+                    } else {
+                        document.getElementById("login-section").style.display = "block";
+                    }
+                }, 1000);
+            }, 2500);
+            init3D(); 
+        };
+
+        function authenticateUser() {
+            let emailInput = document.getElementById("email").value.trim();
+            let passInput = document.getElementById("password").value.trim();
+            if (!emailInput.includes("@")) { alert("Enter a valid email!"); return; }
+            if (passInput.length < 4) { alert("Password min 4 characters!"); return; }
+
+            localStorage.setItem("racerSession", emailInput);
+            currentUserEmail = emailInput;
+            document.getElementById("login-section").style.display = "none";
+            showGameHUD();
+        }
+
+        function showGameHUD() {
+            document.getElementById("hud").style.display = "flex";
+            let savedHS = localStorage.getItem("racerHS_" + currentUserEmail);
+            highScore = savedHS ? parseInt(savedHS) : 0;
+            document.getElementById("high-score").innerText = highScore;
+            restartGame();
+        }
+
+        function logout() {
+            isGameOver = true;
+            engineSound.pause();
+            localStorage.removeItem("racerSession");
+            document.getElementById("hud").style.display = "none";
+            document.getElementById("game-over-screen").style.display = "none";
+            document.getElementById("login-section").style.display = "block";
+        }
+
+        // --- 2. THREE.JS 3D RACING ENGINE ---
+        let scene, camera, renderer;
+        let player, roadLines = [];
+        let obstacles = [];
+        
+        let score = 0;
+        let gameSpeed = 0.6;
+        let isGameOver = true;
+        
+        const lanes = [-3.5, 0, 3.5]; 
+        let currentLane = 1;      
+
+        function createSportsCar(bodyColor) {
+            const carGroup = new THREE.Group();
+
+            const baseGeo = new THREE.BoxGeometry(2.1, 0.3, 4.8);
+            const baseMat = new THREE.MeshPhongMaterial({ color: bodyColor, shininess: 100 });
+            const base = new THREE.Mesh(baseGeo, baseMat);
+            base.position.y = 0.3;
+            carGroup.add(base);
+
+            const hoodGeo = new THREE.BoxGeometry(2.0, 0.3, 2.0);
+            const hood = new THREE.Mesh(hoodGeo, baseMat);
+            hood.position.set(0, 0.5, -1.2);
+            carGroup.add(hood);
+
+            const cabinGeo = new THREE.BoxGeometry(1.6, 0.5, 1.8);
+            const cabinMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 200 }); 
+            const cabin = new THREE.Mesh(cabinGeo, cabinMat);
+            cabin.position.set(0, 0.8, 0.4);
+            carGroup.add(cabin);
+
+            const wingGeo = new THREE.BoxGeometry(2.2, 0.1, 0.4);
+            const wing = new THREE.Mesh(wingGeo, baseMat);
+            wing.position.set(0, 0.8, 2.1);
+            carGroup.add(wing);
+
+            const wingStrutGeo = new THREE.BoxGeometry(0.1, 0.3, 0.1);
+            const leftStrut = new THREE.Mesh(wingStrutGeo, baseMat);
+            leftStrut.position.set(0.8, 0.65, 2.1);
+            const rightStrut = leftStrut.clone();
+            rightStrut.position.x = -0.8;
+            carGroup.add(leftStrut, rightStrut);
+
+            const wheelGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.35, 24);
+            const wheelMat = new THREE.MeshPhongMaterial({ color: 0x151515, roughness: 0.8 });
+            const positions = [
+                {x: 1.15, z: 1.4}, {x: -1.15, z: 1.4}, 
+                {x: 1.15, z: -1.4}, {x: -1.15, z: -1.4}
+            ];
+            
+            positions.forEach(pos => {
+                const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+                wheel.rotation.z = Math.PI / 2;
+                wheel.position.set(pos.x, 0.45, pos.z);
+                carGroup.add(wheel);
+            });
+
+            return carGroup;
+        }
+
+        function init3D() {
+            const canvas = document.getElementById("gameCanvas");
+            
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); 
+            scene.fog = new THREE.Fog(0x87CEEB, 30, 110); 
+
+            camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 150);
+            camera.position.set(0, 4.5, 7.5); 
+            camera.lookAt(0, 0.8, -20);
+
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+            dirLight.position.set(15, 25, 10);
+            scene.add(dirLight);
+
+            const grassGeo = new THREE.PlaneGeometry(300, 300);
+            const grassMat = new THREE.MeshPhongMaterial({ color: 0x2e6f27 });
+            const grass = new THREE.Mesh(grassGeo, grassMat);
+            grass.rotation.x = -Math.PI / 2;
+            scene.add(grass);
+
+            const roadGeo = new THREE.PlaneGeometry(13, 300);
+            const roadMat = new THREE.MeshPhongMaterial({ color: 0x222222 });
+            const road = new THREE.Mesh(roadGeo, roadMat);
+            road.rotation.x = -Math.PI / 2;
+            road.position.y = 0.01; 
+            scene.add(road);
+
+            for(let i = 0; i < 15; i++) {
+                const lineGeo = new THREE.PlaneGeometry(0.25, 4);
+                const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                
+                const lineL = new THREE.Mesh(lineGeo, lineMat);
+                lineL.rotation.x = -Math.PI / 2;
+                lineL.position.set(-2.0, 0.02, -i * 12);
+                scene.add(lineL);
+                roadLines.push(lineL);
+
+                const lineR = new THREE.Mesh(lineGeo, lineMat);
+                lineR.rotation.x = -Math.PI / 2;
+                lineR.position.set(2.0, 0.02, -i * 12);
+                scene.add(lineR);
+                roadLines.push(lineR);
+            }
+
+            player = createSportsCar(0x0044ff);
+            scene.add(player);
+
+            window.addEventListener('resize', () => {
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+            });
+
+            animate3D();
+        }
+
+        function restartGame() {
+            document.getElementById("game-over-screen").style.display = "none";
+            
+            obstacles.forEach(obs => scene.remove(obs.mesh));
+            obstacles = [];
+            
+            score = 0;
+            gameSpeed = 0.55; 
+            currentLane = 1;
+            player.position.set(lanes[currentLane], 0, 0);
+            player.rotation.set(0,0,0);
+            document.getElementById("score").innerText = score;
+            
+            // Engine Sound Logic
+            engineSound.currentTime = 0;
+            engineSound.volume = 0.5;
+            let playPromise = engineSound.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    console.log("Audio autoplay blocked, requires user click.");
+                });
+            }
+
+            isGameOver = false;
+        }
+
+        function spawnObstacle() {
+            if (obstacles.length < 5 && Math.random() < 0.04) {
+                let lane = Math.floor(Math.random() * 3);
+                let type = Math.random() < 0.25 ? "coin" : "car";
+                
+                let overlap = obstacles.some(obs => obs.lane === lane && obs.mesh.position.z < -60);
+                if (overlap) return;
+
+                let mesh;
+                if (type === "car") {
+                    mesh = createSportsCar(0xee1100);
+                    mesh.position.set(lanes[lane], 0, -90);
+                    mesh.rotation.y = Math.PI; 
+                } else {
+                    let geo = new THREE.CylinderGeometry(0.55, 0.55, 0.2, 16);
+                    let mat = new THREE.MeshPhongMaterial({ color: 0xffd700, emissive: 0x553300 });
+                    mesh = new THREE.Mesh(geo, mat);
+                    mesh.rotation.x = Math.PI / 2;
+                    mesh.position.set(lanes[lane], 1, -90);
+                }
+
+                scene.add(mesh);
+                obstacles.push({ mesh: mesh, type: type, lane: lane });
+            }
+        }
+
+        function animate3D() {
+            requestAnimationFrame(animate3D);
+
+            if (!isGameOver) {
+                let targetX = lanes[currentLane];
+                player.position.x += (targetX - player.position.x) * 0.16;
+                
+                let tilt = (targetX - player.position.x) * 0.06;
+                player.rotation.y = tilt; 
+                player.rotation.z = -tilt * 0.6; 
+
+                gameSpeed += 0.00012; 
+
+                roadLines.forEach(line => {
+                    line.position.z += gameSpeed;
+                    if (line.position.z > 6) {
+                        line.position.z -= 180; 
+                    }
+                });
+
+                for (let i = 0; i < obstacles.length; i++) {
+                    let obs = obstacles[i];
+                    obs.mesh.position.z += gameSpeed; 
+                    
+                    if(obs.type === "car") obs.mesh.position.z += (gameSpeed * 0.4);
+
+                    if (obs.type === "coin") {
+                        obs.mesh.rotation.z += 0.08; 
+                    }
+
+                    let distZ = Math.abs(obs.mesh.position.z - player.position.z);
+                    let distX = Math.abs(obs.mesh.position.x - player.position.x);
+
+                    let zHitbox = obs.type === "car" ? 4.3 : 1.5;
+
+                    if (distZ < zHitbox && distX < 1.9) { 
+                        if (obs.type === "coin") {
+                            score += 10;
+                            document.getElementById("score").innerText = score;
+                            coinSound.currentTime = 0;
+                            coinSound.volume = 1.0;
+                            coinSound.play().catch(e => {});
+                            scene.remove(obs.mesh);
+                            obstacles.splice(i, 1);
+                            i--;
+                        } else if (obs.type === "car") {
+                            gameOver();
+                        }
+                    }
+                    else if (obs.mesh.position.z > 12) {
+                        if (obs.type === "car") {
+                            score += 1;
+                            document.getElementById("score").innerText = score;
+                        }
+                        scene.remove(obs.mesh);
+                        obstacles.splice(i, 1);
+                        i--;
+                    }
+                }
+                spawnObstacle();
+            }
+            renderer.render(scene, camera);
+        }
+
+        function gameOver() {
+            isGameOver = true;
+            
+            // Engine Sound Off, Crash Sound On
+            engineSound.pause(); 
+            crashSound.currentTime = 0;
+            crashSound.volume = 1.0;
+            crashSound.play().catch(e => console.log("Crash sound blocked"));
+
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem("racerHS_" + currentUserEmail, highScore);
+                document.getElementById("high-score").innerText = highScore;
+            }
+            document.getElementById("final-score").innerText = score;
+            document.getElementById("game-over-screen").style.display = "block";
+        }
+
+        window.addEventListener("keydown", (e) => {
+            if (isGameOver) return;
+            if (e.key === "ArrowLeft" && currentLane > 0) currentLane--;
+            if (e.key === "ArrowRight" && currentLane < 2) currentLane++;
+        });
+
+        window.addEventListener("touchstart", (e) => {
+            if (isGameOver || e.target.tagName === "BUTTON" || e.target.tagName === "INPUT") return;
+            let touchX = e.touches[0].clientX;
+            let screenHalf = window.innerWidth / 2;
+
+            if (touchX < screenHalf && currentLane > 0) currentLane--;
+            else if (touchX > screenHalf && currentLane < 2) currentLane++;
+        });
+    </script>
+</body>
+</html>
